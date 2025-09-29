@@ -139,3 +139,54 @@ resource "aws_instance" "jenkins-EC2" {
     volume_size = 30
   }
 }
+
+
+
+-------------------  All Security Groups rules In a single ingress with elastic IP---------------------
+
+# SECURITY GROUP ------------------------------------------
+resource "aws_security_group" "prem_sg" {
+  name        = "prem-sg"
+  description = "Allow https http ssh"
+
+  ingress = [
+    for port in [22, 80, 443, 8080, 9000] : {
+      description      = "inbound rules"
+      from_port        = port
+      to_port          = port
+      protocol         = "tcp"
+      cidr_blocks      = ["0.0.0.0/0"]
+      ipv6_cidr_blocks = []
+      prefix_list_ids  = []
+      security_groups  = []
+      self             = false
+    }
+  ]
+
+  egress {
+    description = "all outbound"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "prem-SG"
+  }
+}
+
+# ELASTIC IP (Created but not auto-attached) -----------------------------
+resource "aws_eip" "jenkins_eip" {
+  domain = "vpc"
+
+  tags = {
+    Name = "jenkins-eip"
+  }
+}
+
+# ASSOCIATE EIP WITH EC2 ---------------------------------
+resource "aws_eip_association" "jenkins_eip_assoc" {
+  instance_id   = aws_instance.jenkins-EC2.id
+  allocation_id = aws_eip.jenkins_eip.id
+}
