@@ -119,3 +119,23 @@ resource "aws_instance" "prem-ec2-instance" {
     Name = "prem-ec2-instance"
   }
 }
+
+
+------------------------- Attached extra volume in ec2--------------------------
+
+# CREATING EC2 UBUNTU-SERVER ----------------------------
+resource "aws_instance" "jenkins-EC2" {
+  ami                    = "ami-0360c520857e3138f"
+  instance_type          = "m7i-flex.large"
+  key_name               = "Universal_keys"
+  vpc_security_group_ids = [aws_security_group.prem_sg.id]
+  user_data              = templatefile("./script.sh", {})
+
+  tags = {
+    Name = "jenkins-sonarqube"
+  }
+
+  root_block_device {
+    volume_size = 30
+  }
+}
