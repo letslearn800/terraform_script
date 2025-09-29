@@ -183,3 +183,38 @@ variable "vpc_id" {
   type        = string
   default     = "" # Leave empty to use default VPC
 }
+
+
+
+-----------------------------All security_group rule ports in single ingress rule ------------------------
+
+# Security group
+resource "aws_security_group" "devops_sg" {
+  name        = "devops-sg"
+  description = "Allow SSH, Jenkins, SonarQube, Nexus"
+  vpc_id      = local.vpc_id
+
+  ingress {
+    description = "Allow SSH, Jenkins, SonarQube, Nexus"
+    from_port   = 22
+    to_port     = 9000
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    description = "Nexus"
+    from_port   = 8081
+    to_port     = 8081
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
