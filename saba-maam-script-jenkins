@@ -206,9 +206,208 @@ output "nexus_url" {
 
 
 
+@##################################################################################
+***********************************************************************************
+
+
+provider "aws" {
+  region = var.aws_region
+}
+
+# Select default VPC if vpc_id not provided
+data "aws_vpc" "selected" {
+  count   = var.vpc_id == "" ? 1 : 0
+  default = true
+}
+
+locals {
+  vpc_id = var.vpc_id != "" ? var.vpc_id : data.aws_vpc.selected[0].id
+}
+
+# Get subnets in VPC
+data "aws_subnets" "selected" {
+  filter {
+    name   = "vpc-id"
+    values = [local.vpc_id]
+  }
+}
+
+# Key pair
+resource "aws_key_pair" "mykey" {
+  key_name   = var.key_name
+  public_key = file(var.public_key_path)
+}
+
+# Security group
+resource "aws_security_group" "devops_sg" {
+  name        = "devops-sg"
+  description = "Allow SSH, Jenkins, SonarQube, Nexus"
+  vpc_id      = local.vpc_id
+
+  ingress {
+    description = "SSH"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    description = "Jenkins"
+    from_port   = 8080
+    to_port     = 8080
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    description = "SonarQube"
+    from_port   = 9000
+    to_port     = 9000
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    description = "Nexus"
+    from_port   = 8081
+    to_port     = 8081
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+# EC2 instance
+resource "aws_instance" "devops_server" {
+  ami                         = var.ami_id
+  instance_type               = var.instance_type
+  key_name                    = var.key_name
+  subnet_id                   = data.aws_subnets.selected.ids[0]
+  vpc_security_group_ids      = [aws_security_group.devops_sg.id]
+  associate_public_ip_address = true
+
+  user_data = <<-EOF
+    #!/bin/bash
+    dnf update -y
+
+    # Install Java 17, Git, wget, unzip, Docker
+    dnf install -y java-17-amazon-corretto git wget unzip docker
+
+    # Set Java 17 as default
+    alternatives --install /usr/bin/java java /usr/lib/jvm/java-17-amazon-corretto.x86_64/bin/java 2
+    alternatives --set java /usr/lib/jvm/java-17-amazon-corretto.x86_64/bin/java
+
+    # Enable and start Docker
+    systemctl enable docker
+    systemctl start docker
+    usermod -aG docker ec2-user
+
+    # Install Jenkins
+    wget -O /etc/yum.repos.d/jenkins.repo https://pkg.jenkins.io/redhat-stable/jenkins.repo
+    rpm --import https://pkg.jenkins.io/redhat-stable/jenkins.io-2023.key
+    dnf install -y jenkins
+
+    chown -R jenkins:jenkins /var/lib/jenkins /var/cache/jenkins /var/log/jenkins
+    systemctl daemon-reexec
+    systemctl enable jenkins
+    systemctl start jenkins
+
+    # Nexus installation via Docker
+    docker run -d --name nexus -p 8081:8081 sonatype/nexus3
+    docker update --restart unless-stopped nexus
+
+    # SonarQube installation via Docker
+    sysctl -w vm.max_map_count=262144
+    echo "vm.max_map_count=262144" >> /etc/sysctl.conf
+    docker run -d --name sonarqube -p 9000:9000 sonarqube:lts-community
+    docker update --restart unless-stopped sonarqube
+  EOF
+
+  tags = {
+    Name = "DevOps-Server"
+  }
+}
+
+# Allocate Elastic IP
+resource "aws_eip" "devops_ip" {
+  domain = "vpc"
+
+  tags = {
+    Name = "DevOps-Elastic-IP"
+  }
+}
+
+
+# Associate Elastic IP with EC2
+resource "aws_eip_association" "devops_eip_assoc" {
+  instance_id   = aws_instance.devops_server.id
+  allocation_id = aws_eip.devops_ip.id
+}
+#Output of all resource
+output "ec2_public_ip" {
+  description = "Public IP of the DevOps EC2 instance"
+  value       = aws_eip.devops_ip.public_ip
+}
+
+output "jenkins_url" {
+  description = "Jenkins web interface URL"
+  value       = "http://${aws_eip.devops_ip.public_ip}:8080"
+}
+
+output "sonarqube_url" {
+  description = "SonarQube web interface URL"
+  value       = "http://${aws_eip.devops_ip.public_ip}:9000"
+}
+
+output "nexus_url" {
+  description = "Nexus Repository Manager URL"
+  value       = "http://${aws_eip.devops_ip.public_ip}:8081"
+}
 
 
 
 
+------------------variable-----------------
 
-C:\Users\Dell\OneDrive\Desktop\New_Key
+variable "aws_region" {
+  description = "AWS region to deploy resources"
+  type        = string
+  default     = "us-east-1"
+}
+
+variable "key_name" {
+  description = "Name of the AWS key pair"
+  type        = string
+  default     = "Universal_keys"
+}
+
+variable "public_key_path" {
+  description = "Path to your local SSH public key"
+  type        = string
+  default     = "C:/Users/Dell/.ssh/id_ed25519.pub"
+}
+
+variable "instance_type" {
+  description = "EC2 instance type"
+  type        = string
+  default     = "m7i-flex.large"
+}
+
+variable "ami_id" {
+  description = "Amazon Linux 2023 AMI ID"
+  type        = string
+  default     = "ami-08982f1c5bf93d976" # Amazon Linux 2023 (x86_64) us-east-1
+}
+
+variable "vpc_id" {
+  description = "VPC ID where resources will be created"
+  type        = string
+  default     = "" # Leave empty to use default VPC
+}
